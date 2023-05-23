@@ -171,5 +171,5 @@ Rust (version 1.5 or later)
 
 * Thanks to [@dgtony](https://github.com/dgtony/orderbook-rs/tree/master) for their ordering logic,
   lines [18-53](https://github.com/dgtony/orderbook-rs/blob/master/src/engine/order_queues.rs#L18-L53).
-  I modified it [slightly](https://github.com/mbarth/stream-book/blob/master/src/order_book/model.rs#L30-66) 
+  I modified it [slightly](https://github.com/mbarth/stream-book/blob/master/src/order_book/model.rs#L30-L66) 
   but the logic is basically the same.
