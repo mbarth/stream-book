@@ -1,0 +1,38 @@
+[package]
+name = "stream-book"
+version = "0.1.0"
+edition = "2021"
+authors = ["Marcelo Barth <marcelo.barth@gmail.com>"]
+
+[dependencies]
+actix-files = "0.6.2"
+actix-rt = "2.8.0"
+actix-web = "4.3.1"
+actix-ws = "0.2.0"
+anyhow = "1.0.58"
+assert_approx_eq = "1.0.1"
+chrono = "0.4.24"
+config = "0.13.1"
+crossbeam-channel = "0.5.1"
+ctrlc = "3.2.5"
+futures = "0.3.15"
+grpc = "0.8.3"
+native-tls = "0.2.11"
+num_cpus = "1.15.0"
+prost = "0.11.9"
+serde = { version = "1.0.163", features = ["derive"] }
+serde_json = "1.0.96"
+tokio = { version = "1.28.1", features = ["full"] }
+tokio-native-tls = "0.3.1"
+tokio-tungstenite = "0.19.0"
+tonic = "0.9.2"
+tonic-reflection = "0.9.2"
+to_unit = "1.0.2"
+tracing = "0.1.37"
+tracing-actix-web = "0.6.0"
+tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+tungstenite = "0.19.0"
+url = "2.3.1"
+
+[build-dependencies]
+tonic-build = "0.9.2"

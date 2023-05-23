@@ -1,0 +1,4 @@
+rust_log = """\
+        info,\
+        stream_book=debug,\
+"""

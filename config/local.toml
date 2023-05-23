@@ -1,0 +1,22 @@
+[app]
+ip = "0.0.0.0"
+websocket_port = 50051
+api_port = 8080
+websocket_interval_millis = 600
+top_bids_and_asks_count = 10
+
+[deploy]
+env = "local"
+
+[exchanges]
+# represents 100 results from bitstamp + 20 from binance + 1 extra triggering flush of results
+# basically flushing on every 2nd iteration of combined results received
+websocket_flush_threshold = 121
+
+[exchanges.first_exchange.websocket]
+address = "wss://stream.binance.com:9443/ws/ethbtc@depth20@100ms"
+
+[exchanges.second_exchange.websocket]
+address = "wss://ws.bitstamp.net"
+event = "bts:subscribe"
+channel = "order_book_ethbtc"
