@@ -72,6 +72,17 @@ pub struct OrderBook {
     bid_price_levels: HashMap<String, Order>,
     /// The ask orders in the order book.
     ask_price_levels: HashMap<String, Order>,
+
+    /// Latest snapshot of the order book.
+    snapshot: OrderBookSnapshot,
+}
+
+/// Snapshot containing only the top bids, asks, and the spread.
+#[derive(Debug, Default, Clone)]
+pub struct OrderBookSnapshot {
+    pub top_bids: Vec<Order>,
+    pub top_asks: Vec<Order>,
+    pub spread: f64,
 }
 
 impl OrderBook {
@@ -80,6 +91,7 @@ impl OrderBook {
         Self {
             bid_price_levels: HashMap::new(),
             ask_price_levels: HashMap::new(),
+            snapshot: Default::default(),
         }
     }
 
@@ -125,6 +137,18 @@ impl OrderBook {
     pub fn top_asks(&self, n: usize) -> Vec<Order> {
         let mut cloned_data = self.ask_price_levels.clone();
         OrderBook::sort_and_filter_values(n, &mut cloned_data)
+    }
+
+    pub fn generate_snapshot(&mut self, n: usize) {
+        self.snapshot = OrderBookSnapshot {
+            top_bids: self.top_bids(n),
+            top_asks: self.top_asks(n),
+            spread: self.spread().unwrap_or(0.0),
+        }
+    }
+
+    pub fn snapshot(&self) -> OrderBookSnapshot {
+        self.snapshot.clone()
     }
 
     /// Clears out the order book. Since we're not matching any orders, or receiving any

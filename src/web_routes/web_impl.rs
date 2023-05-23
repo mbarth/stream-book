@@ -41,7 +41,6 @@ pub async fn ws(
 
     let mut session_clone = session.clone();
     let websocket_interval_millis = config.app.websocket_interval_millis;
-    let top_bids_and_asks_count = config.app.top_bids_and_asks_count;
     actix_rt::spawn(async move {
         let mut interval =
             actix_rt::time::interval(Duration::from_millis(websocket_interval_millis));
@@ -55,18 +54,18 @@ pub async fn ws(
 
             // Acquire read lock on order book.
             let read_guard = order_book.read().await;
-
+            let order_book_snapshot = read_guard.snapshot();
             // Get top 10 bids and asks and construct a summary.
             let mut bids = vec![];
             let mut asks = vec![];
-            for bid in read_guard.top_bids(top_bids_and_asks_count) {
+            for bid in order_book_snapshot.top_bids {
                 bids.push(ExchangePriceLevel {
                     exchange: bid.exchange.clone(),
                     price: bid.price,
                     amount: bid.amount,
                 });
             }
-            for ask in read_guard.top_asks(top_bids_and_asks_count) {
+            for ask in order_book_snapshot.top_asks {
                 asks.push(ExchangePriceLevel {
                     exchange: ask.exchange.clone(),
                     price: ask.price,
@@ -74,7 +73,7 @@ pub async fn ws(
                 });
             }
             let summary = ExchangeSummary {
-                spread: read_guard.spread().unwrap_or(0.0),
+                spread: order_book_snapshot.spread,
                 bids,
                 asks,
             };
@@ -230,6 +229,10 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         <h1>Streambook</h1>
         <div class="clear"></div>
         <h2 title="Spread is the difference between the top Bid and top Ask (Bid - Ask)">Spread: <span id="spread"></span></h2>
+        <div class="centered-div">
+            <div id="bids-chart" class="depth-chart"></div>
+            <div id="asks-chart" class="depth-chart"></div>
+        </div>
         <div class="container">
             <div class="column">
                 <h2 title="Bids are offers to buy assets at a specific price.">Top {top_bids_and_asks_count} Bids</h2>
@@ -239,11 +242,6 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
                 <h2 title="Asks are offers to sell assets at a specific price.">Top {top_bids_and_asks_count} Asks</h2>
                 <div id="asks"></div>
             </div>
-        </div>
-        
-        <div class="centered-div">
-            <div id="bids-chart" class="depth-chart"></div>
-            <div id="asks-chart" class="depth-chart"></div>
         </div>
     </div>
     

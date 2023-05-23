@@ -84,6 +84,7 @@ pub async fn start_ws_listeners(
     // Spawn a task to aggregate order book data received from Binance and Bitstamp
     let order_book_clone = Arc::clone(&order_book);
     let websocket_flush_threshold = config.exchanges.websocket_flush_threshold;
+    let top_bids_and_asks_count = config.app.top_bids_and_asks_count;
     let aggregator_task = tokio::spawn(async move {
         info!("Aggregator_task thread started");
         for message in channel_receiver {
@@ -114,6 +115,7 @@ pub async fn start_ws_listeners(
             for ask in asks_to_include {
                 write_guard.add_ask(&ask.exchange, ask.price, ask.amount);
             }
+            write_guard.generate_snapshot(top_bids_and_asks_count);
             // NOTE: Since we're not matching or cancelling/updating the order book, we periodically
             // flush it so the results reflect the most recent data received from the exchanges.
             if write_guard.flush_order_book(websocket_flush_threshold) {

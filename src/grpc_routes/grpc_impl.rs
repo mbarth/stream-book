@@ -60,23 +60,22 @@ impl OrderbookAggregator for StreamBookAggregator {
         let orderbook = Arc::clone(&self.orderbook);
 
         // Spawn new task that fetches and sends order book summaries.
-        let top_bids_and_asks_count = self.config.app.top_bids_and_asks_count;
         tokio::spawn(async move {
             loop {
                 // Acquire read lock on order book.
                 let read_guard = orderbook.read().await;
-
+                let order_book_snapshot = read_guard.snapshot();
                 // Get top 10 bids and asks and construct a summary.
                 let mut bids = vec![];
                 let mut asks = vec![];
-                for bid in read_guard.top_bids(top_bids_and_asks_count) {
+                for bid in order_book_snapshot.top_bids {
                     bids.push(Level {
                         exchange: bid.exchange.clone(),
                         price: bid.price,
                         amount: bid.amount,
                     });
                 }
-                for ask in read_guard.top_asks(top_bids_and_asks_count) {
+                for ask in order_book_snapshot.top_asks {
                     asks.push(Level {
                         exchange: ask.exchange.clone(),
                         price: ask.price,
@@ -84,7 +83,7 @@ impl OrderbookAggregator for StreamBookAggregator {
                     });
                 }
                 let summary = Summary {
-                    spread: read_guard.spread().unwrap_or(0.0),
+                    spread: order_book_snapshot.spread,
                     bids,
                     asks,
                 };
