@@ -70,14 +70,14 @@ impl OrderbookAggregator for StreamBookAggregator {
                 let mut asks = vec![];
                 for bid in order_book_snapshot.top_bids {
                     bids.push(Level {
-                        exchange: bid.exchange.clone(),
+                        exchange: bid.exchange,
                         price: bid.price,
                         amount: bid.amount,
                     });
                 }
                 for ask in order_book_snapshot.top_asks {
                     asks.push(Level {
-                        exchange: ask.exchange.clone(),
+                        exchange: ask.exchange,
                         price: ask.price,
                         amount: ask.amount,
                     });
@@ -92,7 +92,7 @@ impl OrderbookAggregator for StreamBookAggregator {
                 // there's something to send.
                 if !summary.bids.is_empty() {
                     // Send the summary to the client. If sending fails, assume the client has disconnected.
-                    if tx.send(Ok(summary.clone())).await.is_err() {
+                    if tx.send(Ok(summary)).await.is_err() {
                         debug!("Client disconnected");
                         break;
                     }

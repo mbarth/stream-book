@@ -60,14 +60,14 @@ pub async fn ws(
             let mut asks = vec![];
             for bid in order_book_snapshot.top_bids {
                 bids.push(ExchangePriceLevel {
-                    exchange: bid.exchange.clone(),
+                    exchange: bid.exchange,
                     price: bid.price,
                     amount: bid.amount,
                 });
             }
             for ask in order_book_snapshot.top_asks {
                 asks.push(ExchangePriceLevel {
-                    exchange: ask.exchange.clone(),
+                    exchange: ask.exchange,
                     price: ask.price,
                     amount: ask.amount,
                 });
