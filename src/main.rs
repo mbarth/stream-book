@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::{env, sync::Arc};
 
 use actix_files::Files;
@@ -92,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
             orderbook: orderbook.clone(),
             config: config.clone(),
         };
-        let addr = format!("{}:{}", config.app.ip, config.app.websocket_port).parse()?;
+        let addr = SocketAddr::new(config.app.ip.into(), config.app.websocket_port);
         Server::builder()
             .add_service(OrderbookAggregatorServer::new(order_book))
             .add_service(reflection_service)

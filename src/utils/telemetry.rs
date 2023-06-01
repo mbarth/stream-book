@@ -51,7 +51,7 @@ pub fn new_tracing_subscriber(
 }
 
 #[macro_export]
-macro_rules! emit_error {
+macro_rules! emit_event {
     ($level:expr, $kind:expr, $reason:expr) => {
         {
             let target = module_path!();

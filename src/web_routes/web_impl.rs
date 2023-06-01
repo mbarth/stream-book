@@ -13,7 +13,7 @@ use serde_json::json;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use crate::emit_error;
+use crate::emit_event;
 use crate::order_book::model::OrderBook;
 use crate::utils::config::Config;
 use crate::ws_data_providers::ExchangePriceLevel;
@@ -82,7 +82,7 @@ pub async fn ws(
                 Ok(json_string) => json_string,
                 Err(err) => {
                     let msg = format!("Failed to serialize summary: {}", err);
-                    emit_error!(tracing::Level::ERROR, "websocket_handler", msg);
+                    emit_event!(tracing::Level::ERROR, "websocket_handler", msg);
                     continue;
                 }
             };

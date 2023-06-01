@@ -188,7 +188,7 @@ where
                         trace!("Received ping {}", msg);
                         if let Err(e) = ws_sink.send(Message::Pong(msg.into_data())).await {
                             let msg = format!("Error sending pong: {:?}", e);
-                            crate::emit_error!(
+                            crate::emit_event!(
                                 tracing::Level::ERROR,
                                 "spawn_message_listener",
                                 msg
@@ -200,7 +200,7 @@ where
                             Err(e) => {
                                 let msg =
                                     format!("Failed to convert message {} to text: {:?}", msg, e);
-                                crate::emit_error!(
+                                crate::emit_event!(
                                     tracing::Level::ERROR,
                                     "spawn_message_listener",
                                     msg
@@ -212,7 +212,7 @@ where
                             Ok(parsed_result) => {
                                 if let Err(e) = channel_sender.send(parsed_result) {
                                     let msg = format!("Error sending result on channel {:?}", e);
-                                    crate::emit_error!(
+                                    crate::emit_event!(
                                         tracing::Level::ERROR,
                                         "spawn_message_listener",
                                         msg
@@ -224,7 +224,7 @@ where
                                 // Okay to ignore this message.
                                 let msg =
                                     format!("Parsing failed on message: {} error: {}", text, e);
-                                crate::emit_error!(
+                                crate::emit_event!(
                                     tracing::Level::ERROR,
                                     "spawn_message_listener",
                                     msg
@@ -235,7 +235,7 @@ where
                 }
                 Err(e) => {
                     let msg = format!("Error retrieving message: {:?}", e);
-                    crate::emit_error!(tracing::Level::ERROR, "spawn_message_listener", msg);
+                    crate::emit_event!(tracing::Level::ERROR, "spawn_message_listener", msg);
                 }
             }
         }
