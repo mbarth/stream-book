@@ -1,12 +1,13 @@
+use std::env;
 use std::net::SocketAddr;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use actix_files::Files;
 use actix_web::{middleware, web, App, HttpServer};
 use anyhow::Context;
 use futures::future::Future;
 use to_unit::ToUnit;
-use tokio::sync::RwLock;
+use tokio::sync::broadcast;
 use tonic::transport::{Error, Server};
 use tracing::info;
 
@@ -14,7 +15,6 @@ use grpc_routes::grpc_impl::{
     order_book_proto::orderbook_aggregator_server::OrderbookAggregatorServer, StreamBookAggregator,
 };
 
-use crate::order_book::model::OrderBook;
 use crate::utils::{config::Config, telemetry::new_tracing_subscriber};
 use crate::web_routes::web_impl::{favicon, health, index, ws};
 use crate::ws_data_providers::ws_listeners::start_ws_listeners;
@@ -43,33 +43,28 @@ async fn main() -> anyhow::Result<()> {
     new_tracing_subscriber(config.clone(), "info").init();
 
     info!("Starting up");
-    // Initialize the order book
-    let orderbook = Arc::new(RwLock::new(OrderBook::new()));
+
+    // Create a broadcast channel (100 capacity) for sending and receiving snapshot messages
+    let (snapshot_sender, snapshot_receiver) = broadcast::channel(100);
 
     // Start the WebSocket (Binance and Bitstamp) listeners
-    let ws_listeners_handle = start_ws_listeners(Arc::clone(&orderbook), &config).await?;
+    let ws_listeners_handle = start_ws_listeners(snapshot_sender, &config).await?;
 
     info!(
         "Starting HTTP server at http://{}:{}",
         config.app.ip, config.app.api_port
     );
 
-    // Calculate worker threads for Actix-web and Tonic servers
-    let actix_worker_threads = (num_cpus::get_physical() / 4).max(1);
-    let tonic_worker_threads = (num_cpus::get_physical() - actix_worker_threads).max(1);
-    info!(
-        "actix_worker_threads={}, tonic_worker_threads={}",
-        actix_worker_threads, tonic_worker_threads
-    );
-
-    // Clone the orderbook Arc before moving it into the closure
-    let cloned_orderbook = Arc::clone(&orderbook);
-
     // Building Actix Web server
     let cloned_config = config.clone();
+    // Wrap the receiver in an Arc<Mutex<>>
+    let locked_snapshot_receiver =
+        Arc::new(tokio::sync::Mutex::new(snapshot_receiver.resubscribe()));
     let actix_future = HttpServer::new(move || {
+        // Clone the Arc
+        let cloned_snapshot_receiver = Arc::clone(&locked_snapshot_receiver);
         App::new()
-            .app_data(web::Data::new(cloned_orderbook.clone()))
+            .app_data(web::Data::new(cloned_snapshot_receiver))
             .app_data(web::Data::new(cloned_config.clone()))
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
@@ -80,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
             .service(Files::new("/static", "static").show_files_listing())
     })
     .bind((config.app.ip, config.app.api_port))?
-    .workers(actix_worker_threads)
+    .workers(1)
     .run();
 
     // Building Tonic gRPC server with an order book summary handler
@@ -89,13 +84,10 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let tonic_future = {
-        let order_book = StreamBookAggregator {
-            orderbook: orderbook.clone(),
-            config: config.clone(),
-        };
+        let order_book_service = StreamBookAggregator { snapshot_receiver };
         let addr = SocketAddr::new(config.app.ip.into(), config.app.websocket_port);
         Server::builder()
-            .add_service(OrderbookAggregatorServer::new(order_book))
+            .add_service(OrderbookAggregatorServer::new(order_book_service))
             .add_service(reflection_service)
             .serve(addr)
     };

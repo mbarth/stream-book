@@ -5,7 +5,6 @@ use std::sync::{
 };
 
 use anyhow::Context;
-use crossbeam_channel::Sender;
 use futures::{
     future::{self, AbortHandle},
     prelude::stream::{SplitSink, SplitStream},
@@ -13,7 +12,9 @@ use futures::{
 };
 use native_tls::TlsConnector as NativeTlsConnector;
 use serde::de::DeserializeOwned;
-use tokio::{net::TcpStream, sync::RwLock, task::JoinHandle};
+use tokio::sync::broadcast::Sender as BroadcastSender;
+use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::{net::TcpStream, task::JoinHandle};
 use tokio_native_tls::{TlsConnector, TlsStream};
 use tokio_tungstenite::{
     client_async_with_config, tungstenite::protocol::Message, WebSocketStream,
@@ -21,7 +22,7 @@ use tokio_tungstenite::{
 use tracing::{debug, error, info, trace};
 use url::Url;
 
-use crate::order_book::model::OrderBook;
+use crate::order_book::model::{OrderBook, OrderBookSnapshot};
 use crate::utils::config::Config;
 use crate::ws_data_providers::{
     BinanceOrderBookMessage, BitstampOrderBookMessage, ExchangeOrderBookMessage, SubscribeData,
@@ -30,7 +31,7 @@ use crate::ws_data_providers::{
 
 // Function to start WebSocket listeners for different exchanges and aggregates the data into a shared OrderBook
 pub async fn start_ws_listeners(
-    order_book: Arc<RwLock<OrderBook>>,
+    snapshot_sender: BroadcastSender<OrderBookSnapshot>,
     config: &Config,
 ) -> anyhow::Result<JoinHandle<()>> {
     // set up ctrl-c handler to stop the listener threads
@@ -58,7 +59,7 @@ pub async fn start_ws_listeners(
     .await?;
 
     // Create an unbounded channel for sending and receiving messages between tasks
-    let (channel_sender, channel_receiver) = crossbeam_channel::unbounded();
+    let (channel_sender, mut channel_receiver) = tokio::sync::mpsc::channel(100);
 
     // Spawn tasks to listen and parse messages from Binance and Bitstamp
     let first_exchange_parser_task = spawn_message_listener(
@@ -82,12 +83,11 @@ pub async fn start_ws_listeners(
     let mut exclude_duplicates = HashSet::new();
 
     // Spawn a task to aggregate order book data received from Binance and Bitstamp
-    let order_book_clone = Arc::clone(&order_book);
-    let websocket_flush_threshold = config.exchanges.websocket_flush_threshold;
+    let mut order_book = OrderBook::new();
     let top_bids_and_asks_count = config.app.top_bids_and_asks_count;
     let aggregator_task = tokio::spawn(async move {
         info!("Aggregator_task thread started");
-        for message in channel_receiver {
+        while let Some(message) = channel_receiver.recv().await {
             // handler for ctrl-c
             if should_abort.load(Ordering::SeqCst) {
                 abort_handle.abort();
@@ -108,18 +108,27 @@ pub async fn start_ws_listeners(
                     asks_to_include.push(ask);
                 }
             }
-            let mut write_guard = order_book_clone.write().await;
+
             for bid in bids_to_include {
-                write_guard.add_bid(&bid.exchange, bid.price, bid.amount);
+                order_book.add_bid(&bid.exchange, bid.price, bid.amount);
             }
             for ask in asks_to_include {
-                write_guard.add_ask(&ask.exchange, ask.price, ask.amount);
+                order_book.add_ask(&ask.exchange, ask.price, ask.amount);
             }
-            write_guard.generate_snapshot(top_bids_and_asks_count);
-            // NOTE: Since we're not matching or cancelling/updating the order book, we periodically
-            // flush it so the results reflect the most recent data received from the exchanges.
-            if write_guard.flush_order_book(websocket_flush_threshold) {
-                trace!("exclude_duplicates cleared");
+
+            // NOTE: aggregating data from 2 exchanges, therefore once we have data from both exchanges,
+            // we generate a new snapshot and send it to the broadcast channel.
+            if order_book.exchanges_count() > 1 {
+                let snapshot = order_book.generate_snapshot(top_bids_and_asks_count);
+                match snapshot_sender.send(snapshot.clone()) {
+                    Ok(_) => {
+                        trace!("Snapshot sent {:?}", snapshot);
+                    }
+                    Err(e) => {
+                        error!("Error sending snapshot to snapshot_sender: {}", e);
+                    }
+                }
+                order_book = OrderBook::new();
                 exclude_duplicates.clear();
             }
         }
@@ -167,13 +176,13 @@ where
 fn spawn_message_listener<Parser>(
     mut ws_sink: SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     mut ws_stream: SplitStream<WebSocketStream<TlsStream<TcpStream>>>,
-    channel_sender: Sender<ExchangeOrderBookMessage>,
+    channel_sender: MpscSender<ExchangeOrderBookMessage>,
     message_parser: Parser,
     should_abort: Arc<AtomicBool>,
     abort_handle: AbortHandle,
 ) -> JoinHandle<()>
 where
-    Parser: Fn(&str) -> Result<ExchangeOrderBookMessage, serde_json::Error> + Send + 'static,
+    Parser: Fn(&str) -> Result<ExchangeOrderBookMessage, serde_json::Error> + Send + Sync + 'static,
 {
     tokio::spawn(async move {
         while let Some(message) = ws_stream.next().await {
@@ -210,7 +219,7 @@ where
                         };
                         match message_parser(text) {
                             Ok(parsed_result) => {
-                                if let Err(e) = channel_sender.send(parsed_result) {
+                                if let Err(e) = channel_sender.send(parsed_result).await {
                                     let msg = format!("Error sending result on channel {:?}", e);
                                     crate::emit_event!(
                                         tracing::Level::ERROR,

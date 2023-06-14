@@ -1,7 +1,6 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::collections::HashSet;
+use std::time::UNIX_EPOCH;
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use tracing::trace;
 
@@ -25,6 +24,24 @@ pub struct Order {
 pub enum OrderSide {
     Bid,
     Ask,
+}
+
+impl Default for OrderSide {
+    fn default() -> Self {
+        Self::Bid
+    }
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Self {
+            exchange: String::from("DefaultExchange"),
+            price: 0.0,
+            amount: 0.0,
+            timestamp: UNIX_EPOCH, // Earliest possible time
+            order_side: OrderSide::default(),
+        }
+    }
 }
 
 // Arrange by price first and next by time order was received.
@@ -66,308 +83,187 @@ impl PartialEq for Order {
 impl Eq for Order {}
 
 /// An order book, containing bid and ask orders.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OrderBook {
     /// The bid orders in the order book.
-    bid_price_levels: HashMap<String, Order>,
+    bid_orders: BinaryHeap<Order>,
     /// The ask orders in the order book.
-    ask_price_levels: HashMap<String, Order>,
+    ask_orders: BinaryHeap<Order>,
 
-    /// Latest snapshot of the order book.
-    snapshot: OrderBookSnapshot,
+    exchanges: HashSet<String>,
 }
 
 /// Snapshot containing only the top bids, asks, and the spread.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct OrderBookSnapshot {
     pub top_bids: Vec<Order>,
     pub top_asks: Vec<Order>,
     pub spread: f64,
+    pub timestamp: std::time::SystemTime,
+}
+
+impl Default for OrderBookSnapshot {
+    fn default() -> Self {
+        Self {
+            top_bids: Vec::new(),
+            top_asks: Vec::new(),
+            spread: 0.0,
+            timestamp: UNIX_EPOCH, // Earliest possible time
+        }
+    }
 }
 
 impl OrderBook {
     /// Creates a new, empty order book.
     pub fn new() -> Self {
         Self {
-            bid_price_levels: HashMap::new(),
-            ask_price_levels: HashMap::new(),
-            snapshot: Default::default(),
+            bid_orders: BinaryHeap::new(),
+            ask_orders: BinaryHeap::new(),
+            exchanges: HashSet::new(),
         }
     }
 
     /// Adds a bid order to the order book.
     pub fn add_bid(&mut self, exchange: &str, price: f64, amount: f64) {
-        self.bid_price_levels
-            .entry(format!("{}:{}", exchange, price))
-            .and_modify(|order| {
-                order.amount += amount;
-            })
-            .or_insert(Order {
-                exchange: exchange.to_string(),
-                price,
-                amount,
-                timestamp: std::time::SystemTime::now(),
-                order_side: OrderSide::Bid,
-            });
+        self.bid_orders.push(Order {
+            exchange: exchange.to_string(),
+            price,
+            amount,
+            timestamp: std::time::SystemTime::now(),
+            order_side: OrderSide::Bid,
+        });
+        self.exchanges.insert(exchange.to_string());
     }
 
     /// Adds an ask order to the order book.
     pub fn add_ask(&mut self, exchange: &str, price: f64, amount: f64) {
-        self.ask_price_levels
-            .entry(format!("{}:{}", exchange, price))
-            .and_modify(|order| {
-                order.amount += amount;
-            })
-            .or_insert(Order {
-                exchange: exchange.to_string(),
-                price,
-                amount,
-                timestamp: std::time::SystemTime::now(),
-                order_side: OrderSide::Ask,
-            });
+        self.ask_orders.push(Order {
+            exchange: exchange.to_string(),
+            price,
+            amount,
+            timestamp: std::time::SystemTime::now(),
+            order_side: OrderSide::Ask,
+        });
+        self.exchanges.insert(exchange.to_string());
     }
 
-    /// Returns the top n bid orders from the order book.
-    pub fn top_bids(&self, n: usize) -> Vec<Order> {
-        let mut cloned_data = self.bid_price_levels.clone();
-        OrderBook::sort_and_filter_values(n, &mut cloned_data)
+    pub fn exchanges_count(&self) -> usize {
+        self.exchanges.len()
     }
 
-    /// Returns the top n ask orders from the order book.
-    pub fn top_asks(&self, n: usize) -> Vec<Order> {
-        let mut cloned_data = self.ask_price_levels.clone();
-        OrderBook::sort_and_filter_values(n, &mut cloned_data)
+    // Returns the top n bid orders from the order book.
+    fn top_bids(&self, n: usize) -> Vec<Order> {
+        let mut cloned_data = self.bid_orders.clone();
+        cloned_data.drain().take(n).collect()
     }
 
-    pub fn generate_snapshot(&mut self, n: usize) {
-        self.snapshot = OrderBookSnapshot {
-            top_bids: self.top_bids(n),
-            top_asks: self.top_asks(n),
-            spread: self.spread().unwrap_or(0.0),
+    // Returns the top n ask orders from the order book.
+    fn top_asks(&self, n: usize) -> Vec<Order> {
+        let mut cloned_data = self.ask_orders.clone();
+        cloned_data.drain().take(n).collect()
+    }
+
+    pub fn generate_snapshot(&mut self, n: usize) -> OrderBookSnapshot {
+        let top_bids = self.top_bids(n);
+        let top_asks = self.top_asks(n);
+        trace!("bids len: {} asks len: {}", top_bids.len(), top_asks.len());
+        let spread = self.calculate_spread(&top_bids, &top_asks);
+        OrderBookSnapshot {
+            top_bids,
+            top_asks,
+            spread,
+            timestamp: std::time::SystemTime::now(),
         }
     }
 
-    pub fn snapshot(&self) -> OrderBookSnapshot {
-        self.snapshot.clone()
-    }
-
-    /// Clears out the order book. Since we're not matching any orders, or receiving any
-    /// updates or cancels, this can be used to clear out the orders to only show the latest
-    /// most revelant orders.
-    pub fn flush_order_book(&mut self, threshold: usize) -> bool {
-        let mut flushed = false;
-        if self.bid_price_levels.len() > threshold {
-            trace!("Flushing order book");
-            self.bid_price_levels.clear();
-            self.ask_price_levels.clear();
-            flushed = true;
-        }
-        flushed
-    }
-
-    // Sort the values in the passed in hashmap and then grab the top n values.
-    fn sort_and_filter_values(n: usize, data: &mut HashMap<String, Order>) -> Vec<Order> {
-        let mut sorted_data: Vec<Order> = Vec::new();
-        // Convert values of HashMap into a BinaryHeap
-        let mut binary_heap: BinaryHeap<Order> = BinaryHeap::new();
-        binary_heap.extend(data.values().cloned());
-        // Grab the top n values
-        for _ in 0..n {
-            if let Some(data) = binary_heap.pop() {
-                sorted_data.push(data);
-            }
-        }
-        sorted_data
-    }
-
-    /// Returns the spread of the order book, which is the difference between the best ask price
-    /// and the best bid price.
-    pub fn spread(&self) -> Option<f64> {
-        let mut bids_sorted: BinaryHeap<Order> = BinaryHeap::new();
-        bids_sorted.extend(self.bid_price_levels.values().cloned());
-        let best_bid = bids_sorted.peek();
-
-        let mut asks_sorted: BinaryHeap<Order> = BinaryHeap::new();
-        asks_sorted.extend(self.ask_price_levels.values().cloned());
-        let best_ask = asks_sorted.peek();
-
-        match (best_bid, best_ask) {
-            (Some(bid), Some(ask)) => Some(bid.price - ask.price),
-            _ => None,
+    fn calculate_spread(&self, top_bids: &[Order], top_asks: &[Order]) -> f64 {
+        match (top_bids.get(0), top_asks.get(0)) {
+            (Some(bid), Some(ask)) => bid.price - ask.price,
+            _ => 0.0,
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime};
+    use std::thread;
+    use std::time::Duration;
 
     use super::*;
 
     #[test]
     fn test_add_bid() {
         let mut order_book = OrderBook::new();
-        order_book.add_bid("binance", 0.06745, 12.7339);
-
-        assert_eq!(order_book.bid_price_levels.len(), 1);
-
-        let bid = order_book.bid_price_levels.get("binance:0.06745");
-        assert!(bid.is_some());
-
-        let bid = bid.unwrap();
-        assert_eq!(bid.exchange, "binance");
-        assert_eq!(bid.price, 0.06745);
-        assert_eq!(bid.amount, 12.7339);
-        assert_eq!(bid.order_side, OrderSide::Bid);
+        order_book.add_bid("test_exchange", 5000.0, 1.0);
+        assert_eq!(order_book.bid_orders.len(), 1);
     }
 
     #[test]
     fn test_add_ask() {
         let mut order_book = OrderBook::new();
-        order_book.add_ask("binance", 0.06745, 8.7224);
-
-        assert_eq!(order_book.ask_price_levels.len(), 1);
-
-        let ask = order_book.ask_price_levels.get("binance:0.06745");
-        assert!(ask.is_some());
-
-        let ask = ask.unwrap();
-        assert_eq!(ask.exchange, "binance");
-        assert_eq!(ask.price, 0.06745);
-        assert_eq!(ask.amount, 8.7224);
-        assert_eq!(ask.order_side, OrderSide::Ask);
+        order_book.add_ask("test_exchange", 5000.0, 1.0);
+        assert_eq!(order_book.ask_orders.len(), 1);
     }
 
     #[test]
     fn test_top_bids() {
         let mut order_book = OrderBook::new();
-        order_book.add_bid("binance", 0.06745, 12.7339);
-        order_book.add_bid("binance", 0.06746, 13.7297);
-        order_book.add_bid("binance", 0.06747, 11.5123);
-
-        let top_bids = order_book.top_bids(2);
-        assert_eq!(top_bids.len(), 2);
-
-        let bid1 = top_bids.get(0).unwrap();
-        assert_eq!(bid1.exchange, "binance");
-        assert_eq!(bid1.price, 0.06747);
-        assert_eq!(bid1.amount, 11.5123);
-        assert_eq!(bid1.order_side, OrderSide::Bid);
-
-        let bid2 = top_bids.get(1).unwrap();
-        assert_eq!(bid2.exchange, "binance");
-        assert_eq!(bid2.price, 0.06746);
-        assert_eq!(bid2.amount, 13.7297);
-        assert_eq!(bid2.order_side, OrderSide::Bid);
+        order_book.add_bid("test_exchange", 5000.0, 1.0);
+        order_book.add_bid("test_exchange", 6000.0, 1.5);
+        let top_bids = order_book.top_bids(1);
+        assert_eq!(top_bids.len(), 1);
+        assert_eq!(top_bids[0].price, 6000.0);
     }
 
     #[test]
     fn test_top_asks() {
         let mut order_book = OrderBook::new();
-        order_book.add_ask("binance", 0.06745, 8.7224);
-        order_book.add_ask("binance", 0.06746, 13.748);
-        order_book.add_ask("binance", 0.06747, 9.5123);
-
-        let top_asks = order_book.top_asks(2);
-        assert_eq!(top_asks.len(), 2);
-
-        let ask1 = top_asks.get(0).unwrap();
-        assert_eq!(ask1.exchange, "binance");
-        assert_eq!(ask1.price, 0.06745);
-        assert_eq!(ask1.amount, 8.7224);
-        assert_eq!(ask1.order_side, OrderSide::Ask);
-
-        let ask2 = top_asks.get(1).unwrap();
-        assert_eq!(ask2.exchange, "binance");
-        assert_eq!(ask2.price, 0.06746);
-        assert_eq!(ask2.amount, 13.748);
-        assert_eq!(ask2.order_side, OrderSide::Ask);
+        order_book.add_ask("test_exchange", 5000.0, 1.0);
+        order_book.add_ask("test_exchange", 4000.0, 1.5);
+        let top_asks = order_book.top_asks(1);
+        assert_eq!(top_asks.len(), 1);
+        assert_eq!(top_asks[0].price, 4000.0);
     }
 
     #[test]
-    fn test_spread_with_data() {
+    fn test_calculate_spread() {
         let mut order_book = OrderBook::new();
-        order_book.add_bid("binance", 0.06745, 12.7339);
-        order_book.add_ask("binance", 0.06746, 8.7224);
-
-        let spread = order_book.spread().unwrap();
-        assert_approx_eq::assert_approx_eq!(spread, 0.00001, 2f64);
+        order_book.add_bid("test_exchange", 5000.0, 1.0);
+        order_book.add_ask("test_exchange", 4000.0, 1.0);
+        let top_bids = order_book.top_bids(1);
+        let top_asks = order_book.top_asks(1);
+        let spread = order_book.calculate_spread(&top_bids, &top_asks);
+        assert_eq!(spread, 1000.0);
     }
 
     #[test]
-    fn test_spread_without_data() {
+    fn test_calculate_spread_no_orders() {
         let order_book = OrderBook::new();
-
-        let spread = order_book.spread();
-        assert_eq!(spread, None);
+        let top_bids = order_book.top_bids(1);
+        let top_asks = order_book.top_asks(1);
+        let spread = order_book.calculate_spread(&top_bids, &top_asks);
+        assert_eq!(spread, 0.0);
     }
 
     #[test]
-    fn test_order_comparison() {
-        let timestamp1 = SystemTime::now();
-        let timestamp2 = timestamp1 + Duration::new(5, 0);
-        assert!(timestamp1 < timestamp2);
-        let order1 = Order {
-            exchange: "exchange1".to_string(),
-            price: 0.06745,
-            amount: 8.7224,
-            timestamp: timestamp1,
-            order_side: OrderSide::Bid,
-        };
-        let order2 = Order {
-            exchange: "exchange2".to_string(),
-            price: 0.06745,
-            amount: 8.7224,
-            timestamp: timestamp2,
-            order_side: OrderSide::Bid,
-        };
-        let order3 = Order {
-            exchange: "exchange3".to_string(),
-            price: 0.06750,
-            amount: 8.7224,
-            timestamp: timestamp1,
-            order_side: OrderSide::Bid,
-        };
-        assert!(order1 > order2); // older order wins, FIFO
-        assert_eq!(order1, order1.clone());
-        assert!(order1 < order3);
-    }
-
-    #[test]
-    fn test_add_existing_bid() {
+    fn test_orders_from_multiple_exchanges() {
         let mut order_book = OrderBook::new();
-        order_book.add_bid("binance", 0.06745, 12.7339);
-        assert_eq!(order_book.bid_price_levels.len(), 1);
-        order_book.add_bid("binance", 0.06745, 7.2661);
-        assert_eq!(order_book.bid_price_levels.len(), 1);
-        let bid = order_book.bid_price_levels.get("binance:0.06745").unwrap();
-        assert_eq!(bid.amount, 20.0);
-    }
-
-    #[test]
-    fn test_flush_order_book() {
-        let mut order_book = OrderBook::new();
-        for i in 0..10 {
-            order_book.add_bid("binance", 0.06745 + (i as f64 * 0.00001), 12.7339);
-        }
-        assert_eq!(order_book.bid_price_levels.len(), 10);
-        assert!(!order_book.flush_order_book(11));
-        assert_eq!(order_book.bid_price_levels.len(), 10);
-        assert!(order_book.flush_order_book(5));
-        assert_eq!(order_book.bid_price_levels.len(), 0);
-    }
-
-    #[test]
-    fn test_top_bids_more_than_orders() {
-        let mut order_book = OrderBook::new();
-        order_book.add_bid("binance", 0.06745, 12.7339);
+        order_book.add_bid("exchange1", 5000.0, 1.0);
+        order_book.add_bid("exchange2", 6000.0, 1.5);
+        assert_eq!(order_book.exchanges_count(), 2);
         let top_bids = order_book.top_bids(2);
-        assert_eq!(top_bids.len(), 1);
+        assert_eq!(top_bids.len(), 2);
+        assert!(top_bids.iter().any(|order| order.exchange == "exchange1"));
+        assert!(top_bids.iter().any(|order| order.exchange == "exchange2"));
     }
 
     #[test]
-    fn test_spread_no_bids_or_asks() {
-        let order_book = OrderBook::new();
-        assert_eq!(order_book.spread(), None);
+    fn test_order_order_by_price_and_time() {
+        let mut order_book = OrderBook::new();
+        order_book.add_bid("exchange1", 5000.0, 1.0);
+        thread::sleep(Duration::from_millis(10)); // to ensure a different timestamp
+        order_book.add_bid("exchange1", 5000.0, 1.5);
+        let top_bids = order_book.top_bids(2);
+        assert_eq!(top_bids.len(), 2);
+        assert!(top_bids[0].timestamp < top_bids[1].timestamp);
     }
 }
