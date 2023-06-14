@@ -27,7 +27,6 @@ pub struct AppConfig {
     pub ip: std::net::Ipv4Addr,
     pub websocket_port: u16,
     pub api_port: u16,
-    pub websocket_interval_millis: u64,
     pub top_bids_and_asks_count: usize,
 }
 
@@ -37,7 +36,6 @@ impl Default for AppConfig {
             ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
             websocket_port: 50051,
             api_port: 8080,
-            websocket_interval_millis: 750,
             top_bids_and_asks_count: 10,
         }
     }
@@ -51,7 +49,6 @@ pub struct DeployConfig {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ExchangesConfig {
-    pub websocket_flush_threshold: usize,
     pub first_exchange: FirstExchangeConfig,
     pub second_exchange: SecondExchangeConfig,
 }
@@ -126,7 +123,6 @@ mod tests {
         assert_eq!(config.ip, std::net::Ipv4Addr::new(0, 0, 0, 0));
         assert_eq!(config.websocket_port, 50051);
         assert_eq!(config.api_port, 8080);
-        assert_eq!(config.websocket_interval_millis, 750);
         assert_eq!(config.top_bids_and_asks_count, 10);
     }
 }

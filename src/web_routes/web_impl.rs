@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use actix_files::NamedFile;
 use actix_web::{
@@ -10,14 +9,13 @@ use actix_web::{
 use actix_ws::Message;
 use futures::stream::StreamExt;
 use serde_json::json;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast::Receiver, Mutex};
 use tracing::{debug, info};
 
 use crate::emit_event;
-use crate::order_book::model::OrderBook;
+use crate::order_book::model::OrderBookSnapshot;
 use crate::utils::config::Config;
-use crate::ws_data_providers::ExchangePriceLevel;
-use crate::ws_data_providers::ExchangeSummary;
+use crate::ws_data_providers::{ExchangePriceLevel, ExchangeSummary};
 
 /// Sanity check to ensure that the server is running.
 #[get("/health")]
@@ -28,64 +26,26 @@ pub async fn health() -> impl Responder {
 /// This is a websocket handler for the orderbook.
 #[get("/ws")]
 pub async fn ws(
-    order_book: web::Data<Arc<RwLock<OrderBook>>>,
-    config: web::Data<Config>,
+    snapshot_receiver: web::Data<Arc<Mutex<Receiver<OrderBookSnapshot>>>>,
     req: HttpRequest,
     body: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Got a ws request: {:?}", req);
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body)?;
-
-    // Clone Arc reference to order book.
-    let order_book = Arc::clone(order_book.get_ref());
-
     let mut session_clone = session.clone();
-    let websocket_interval_millis = config.app.websocket_interval_millis;
     actix_rt::spawn(async move {
-        let mut interval =
-            actix_rt::time::interval(Duration::from_millis(websocket_interval_millis));
-
-        loop {
-            // NOTE: Putting a delay here so that reads between gRPC and websockets don't compete
-            // too much. This is not ideal, but the websocket addition is just to have a
-            // visualization of results. Plus, if there is no delay, the results come in too quickly
-            // on the page making it hard to use it for visual analysis.
-            interval.tick().await;
-
-            // Acquire read lock on order book.
-            let read_guard = order_book.read().await;
-            let order_book_snapshot = read_guard.snapshot();
-            // Get top 10 bids and asks and construct a summary.
-            let mut bids = vec![];
-            let mut asks = vec![];
-            for bid in order_book_snapshot.top_bids {
-                bids.push(ExchangePriceLevel {
-                    exchange: bid.exchange,
-                    price: bid.price,
-                    amount: bid.amount,
-                });
-            }
-            for ask in order_book_snapshot.top_asks {
-                asks.push(ExchangePriceLevel {
-                    exchange: ask.exchange,
-                    price: ask.price,
-                    amount: ask.amount,
-                });
-            }
-            let summary = ExchangeSummary {
-                spread: order_book_snapshot.spread,
-                bids,
-                asks,
-            };
-
-            let json_string = match serde_json::to_string(&summary) {
-                Ok(json_string) => json_string,
-                Err(err) => {
-                    let msg = format!("Failed to serialize summary: {}", err);
-                    emit_event!(tracing::Level::ERROR, "websocket_handler", msg);
-                    continue;
-                }
-            };
+        // Lock the Mutex and resubscribe
+        let mut snapshot_receiver = snapshot_receiver.lock().await.resubscribe();
+        while let Ok(order_book_snapshot) = snapshot_receiver.recv().await {
+            let json_string =
+                match serde_json::to_string(&ExchangeSummary::from(order_book_snapshot)) {
+                    Ok(json_string) => json_string,
+                    Err(err) => {
+                        let msg = format!("Failed to serialize summary: {}", err);
+                        emit_event!(tracing::Level::ERROR, "websocket_handler", msg);
+                        continue;
+                    }
+                };
             if let Err(err) = session_clone.text(json_string).await {
                 // Send the json to the client. If sending fails, assume the client has disconnected.
                 debug!("Client disconnected: {}", err);
@@ -115,6 +75,36 @@ pub async fn ws(
     });
 
     Ok(response)
+}
+
+impl From<OrderBookSnapshot> for ExchangeSummary {
+    fn from(snapshot: OrderBookSnapshot) -> Self {
+        let bids = snapshot
+            .top_bids
+            .into_iter()
+            .map(|bid| ExchangePriceLevel {
+                exchange: bid.exchange,
+                price: bid.price,
+                amount: bid.amount,
+            })
+            .collect();
+
+        let asks = snapshot
+            .top_asks
+            .into_iter()
+            .map(|ask| ExchangePriceLevel {
+                exchange: ask.exchange,
+                price: ask.price,
+                amount: ask.amount,
+            })
+            .collect();
+
+        ExchangeSummary {
+            spread: snapshot.spread,
+            bids,
+            asks,
+        }
+    }
 }
 
 /// Favicon handler
