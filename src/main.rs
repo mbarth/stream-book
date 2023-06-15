@@ -95,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
     // NOTE: Clippy is very pedantic about this "non-binding `let` on a future", but we're doing it
     // so we can run both the actix-web and the Tonic gRPC servers in parallel.
     #[allow(clippy::let_underscore_future)]
-    let _ = tokio::task::spawn(async move { actix_future.await });
+    let _ = tokio::task::spawn(actix_future);
     // Run Tonic server with a ctrl-c handler
     tonic_runner(tonic_future).await?;
     ws_listeners_handle.await?;
