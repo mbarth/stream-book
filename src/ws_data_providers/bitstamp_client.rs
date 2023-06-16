@@ -12,7 +12,7 @@ use url::Url;
 use async_trait::async_trait;
 
 use crate::ws_data_providers::ws_async_client_factory::{
-    WSAsyncClient, WsClient, WsSink, WsStream,
+    WsAsyncClient, WsClient, WsSink, WsStream,
 };
 use crate::ws_data_providers::{SubscribeData, SubscribeMessage};
 
@@ -23,14 +23,14 @@ pub(super) struct BitstampWsClient {
     pub channel: String,
 }
 
-impl WSAsyncClient<WsSink, WsStream> for BitstampWsClient {
-    fn get_ws_client(&self) -> Result<Box<dyn WsClient<WsSink, WsStream>>> {
+impl WsClient<WsSink, WsStream> for BitstampWsClient {
+    fn get_ws_async_client(&self) -> Result<Box<dyn WsAsyncClient<WsSink, WsStream>>> {
         Ok(Box::new(self.clone()))
     }
 }
 
 #[async_trait]
-impl WsClient<WsSink, WsStream> for BitstampWsClient {
+impl WsAsyncClient<WsSink, WsStream> for BitstampWsClient {
     async fn get_sink_and_stream(&self) -> Result<(WsSink, WsStream)> {
         // connection setup and handshake code
         let url = Url::parse(&self.address)?;

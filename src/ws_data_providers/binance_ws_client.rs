@@ -12,7 +12,7 @@ use url::Url;
 use async_trait::async_trait;
 
 use crate::ws_data_providers::ws_async_client_factory::{
-    WSAsyncClient, WsClient, WsSink, WsStream,
+    WsAsyncClient, WsClient, WsSink, WsStream,
 };
 
 #[derive(Debug, Clone)]
@@ -20,14 +20,14 @@ pub(super) struct BinanceWsClient {
     pub address: String,
 }
 
-impl WSAsyncClient<WsSink, WsStream> for BinanceWsClient {
-    fn get_ws_client(&self) -> Result<Box<dyn WsClient<WsSink, WsStream>>> {
+impl WsClient<WsSink, WsStream> for BinanceWsClient {
+    fn get_ws_async_client(&self) -> Result<Box<dyn WsAsyncClient<WsSink, WsStream>>> {
         Ok(Box::new(self.clone()))
     }
 }
 
 #[async_trait]
-impl WsClient<WsSink, WsStream> for BinanceWsClient {
+impl WsAsyncClient<WsSink, WsStream> for BinanceWsClient {
     async fn get_sink_and_stream(&self) -> Result<(WsSink, WsStream)> {
         // connection setup and handshake code
         let url = Url::parse(&self.address)?;

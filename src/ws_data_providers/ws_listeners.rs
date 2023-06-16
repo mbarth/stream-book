@@ -37,10 +37,10 @@ pub async fn start_ws_listeners(
 
     // Retrieve WebSocket clients for binance and bitstamp exchanges.
     let factory = WsAsyncClientFactory::new(config);
-    let binance_ws_client = factory.get_ws_client(BINANCE_EXCHANGE)?;
-    let bitstamp_ws_client = factory.get_ws_client(BITSTAMP_EXCHANGE)?;
-    let (binance_sink, binance_stream) = binance_ws_client.get_sink_and_stream().await?;
-    let (bitstamp_sink, bitstamp_stream) = bitstamp_ws_client.get_sink_and_stream().await?;
+    let binance_client = factory.get_ws_async_client(BINANCE_EXCHANGE)?;
+    let bitstamp_client = factory.get_ws_async_client(BITSTAMP_EXCHANGE)?;
+    let (binance_sink, binance_stream) = binance_client.get_sink_and_stream().await?;
+    let (bitstamp_sink, bitstamp_stream) = bitstamp_client.get_sink_and_stream().await?;
 
     // Create channel for sending and receiving messages between tasks
     let (message_sender, message_receiver) = tokio::sync::mpsc::channel(100);
