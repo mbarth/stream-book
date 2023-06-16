@@ -387,7 +387,7 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         // final data array
         for (let i = 0; i < ws_data_bids.length; i++) {
             bidsData.push({
-                idx: i,
+                idx: ws_data_bids[i].price,
                 orders: cum_data_array[i],
             })
         }
@@ -440,7 +440,7 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         // final data array
         for (let i = 0; i < ws_data_asks.length; i++) {
             asksData.push({
-                idx: i,
+                idx: ws_data_asks[i].price,
                 orders: cum_data_array[i],
             })
         }
