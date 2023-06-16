@@ -13,8 +13,8 @@ use crate::utils::config::Config;
 use crate::ws_data_providers::binance_ws_client::BinanceWsClient;
 use crate::ws_data_providers::bitstamp_client::BitstampWsClient;
 
-pub const BINANCE_CLIENT_ID: &str = "binance";
-pub const BITSTAMP_CLIENT_ID: &str = "bitstamp";
+pub const BINANCE_EXCHANGE: &str = "binance";
+pub const BITSTAMP_EXCHANGE: &str = "bitstamp";
 
 pub type WsSink = SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>;
 pub type WsStream = SplitStream<WebSocketStream<TlsStream<TcpStream>>>;
@@ -47,11 +47,11 @@ impl WsAsyncClientFactory {
             channel: config.exchanges.bitstamp.channel.clone(),
         };
         ws_async_client_factory_map.insert(
-            BINANCE_CLIENT_ID.to_string(),
+            BINANCE_EXCHANGE.to_string(),
             Box::new(binance_client) as Box<dyn WSAsyncClient<WsSink, WsStream>>,
         );
         ws_async_client_factory_map.insert(
-            BITSTAMP_CLIENT_ID.to_string(),
+            BITSTAMP_EXCHANGE.to_string(),
             Box::new(bitstamp_client) as Box<dyn WSAsyncClient<WsSink, WsStream>>,
         );
         WsAsyncClientFactory {

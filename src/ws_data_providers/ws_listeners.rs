@@ -21,7 +21,7 @@ use tracing::{debug, error, info, trace};
 use crate::order_book::model::{OrderBook, OrderBookSnapshot};
 use crate::utils::config::Config;
 use crate::ws_data_providers::ws_async_client_factory::{
-    WsAsyncClientFactory, BINANCE_CLIENT_ID, BITSTAMP_CLIENT_ID,
+    WsAsyncClientFactory, BINANCE_EXCHANGE, BITSTAMP_EXCHANGE,
 };
 use crate::ws_data_providers::{
     BinanceOrderBookMessage, BitstampOrderBookMessage, ExchangeOrderBookMessage,
@@ -37,12 +37,12 @@ pub async fn start_ws_listeners(
 
     // Retrieve WebSocket clients for binance and bitstamp exchanges.
     let factory = WsAsyncClientFactory::new(config);
-    let binance_ws_client = factory.get_ws_client(BINANCE_CLIENT_ID)?;
-    let bitstamp_ws_client = factory.get_ws_client(BITSTAMP_CLIENT_ID)?;
+    let binance_ws_client = factory.get_ws_client(BINANCE_EXCHANGE)?;
+    let bitstamp_ws_client = factory.get_ws_client(BITSTAMP_EXCHANGE)?;
     let (binance_sink, binance_stream) = binance_ws_client.get_sink_and_stream().await?;
     let (bitstamp_sink, bitstamp_stream) = bitstamp_ws_client.get_sink_and_stream().await?;
 
-    // Create an unbounded channel for sending and receiving messages between tasks
+    // Create channel for sending and receiving messages between tasks
     let (message_sender, message_receiver) = tokio::sync::mpsc::channel(100);
 
     // Spawn tasks to listen and parse messages from Binance and Bitstamp

@@ -54,7 +54,6 @@ impl WsClient<WsSink, WsStream> for BinanceWsClient {
             .context("Failed to complete websocket handshake for host binance")?;
 
         info!("WebSocket handshake has been successfully completed for binance");
-        let (write, read) = ws_stream.split();
-        Ok((write, read))
+        Ok(ws_stream.split())
     }
 }

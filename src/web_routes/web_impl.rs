@@ -387,8 +387,8 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         // final data array
         for (let i = 0; i < ws_data_bids.length; i++) {
             bidsData.push({
-                idx: ws_data_bids[i].price,
-                orders: cum_data_array[i]
+                idx: i,
+                orders: cum_data_array[i],
             })
         }
 
@@ -413,8 +413,7 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         bidsSvg.selectAll('.bar')
             .data(bidsData)
             .enter().append('rect')
-            .attr('class', 'bar')
-            .attr('class', 'bar-bids')
+            .attr('class', 'bar bar-bids')
             .attr('x', function (d) {
                 return bidsX(d.idx)
             })
@@ -441,8 +440,8 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         // final data array
         for (let i = 0; i < ws_data_asks.length; i++) {
             asksData.push({
-                idx: ws_data_asks[i].price,
-                orders: cum_data_array[i]
+                idx: i,
+                orders: cum_data_array[i],
             })
         }
 
@@ -464,10 +463,9 @@ pub async fn index(config: web::Data<Config>) -> HttpResponse {
         asksSvg.selectAll('.bar')
             .data(asksData)
             .enter().append('rect')
-            .attr('class', 'bar')
-            .attr('class', 'bar-asks')
+            .attr('class', 'bar bar-asks')
             .attr('x', function (d) {
-                return asksX(d.idx)
+                return asksX(d.idx);
             })
             .attr('width', asksX.bandwidth())
             .attr('y', function (d) {

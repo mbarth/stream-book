@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ws_data_providers::ws_async_client_factory::{BINANCE_EXCHANGE, BITSTAMP_EXCHANGE};
+
 mod binance_ws_client;
 mod bitstamp_client;
 mod ws_async_client_factory;
@@ -66,7 +68,7 @@ struct BitstampOrderBookData {
 impl From<BitstampPriceLevel> for ExchangePriceLevel {
     fn from(level: BitstampPriceLevel) -> Self {
         ExchangePriceLevel {
-            exchange: "bitstamp".to_string(),
+            exchange: BITSTAMP_EXCHANGE.to_string(),
             price: level.price.parse::<f64>().unwrap_or(0.0),
             amount: level.amount.parse::<f64>().unwrap_or(0.0),
         }
@@ -110,7 +112,7 @@ struct BinanceOrderBookMessage {
 impl From<BinancePriceLevel> for ExchangePriceLevel {
     fn from(level: BinancePriceLevel) -> Self {
         ExchangePriceLevel {
-            exchange: "binance".to_string(),
+            exchange: BINANCE_EXCHANGE.to_string(),
             price: level.price.parse::<f64>().unwrap_or(0.0),
             amount: level.amount.parse::<f64>().unwrap_or(0.0),
         }
