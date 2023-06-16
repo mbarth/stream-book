@@ -126,8 +126,7 @@ fn spawn_order_book_aggregator(
                 order_book.add_ask(&ask.exchange, ask.price, ask.amount);
             }
 
-            // NOTE: aggregating data from 2 exchanges, therefore once we have data from both exchanges,
-            // we generate a new snapshot and send it to the broadcast channel.
+            // ASSUMPTION: only generate a new snapshot once we have data from both exchanges
             if order_book.exchanges_count() > 1 {
                 let snapshot = order_book.generate_snapshot(top_bids_and_asks_count);
                 match snapshot_sender.send(snapshot.clone()) {
