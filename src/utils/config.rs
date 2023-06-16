@@ -49,25 +49,20 @@ pub struct DeployConfig {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ExchangesConfig {
-    pub first_exchange: FirstExchangeConfig,
-    pub second_exchange: SecondExchangeConfig,
+    pub binance: BinanceConfig,
+    pub bitstamp: BitstampConfig,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct FirstExchangeConfig {
-    pub websocket: WebsocketConfig,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct SecondExchangeConfig {
-    pub websocket: WebsocketConfig,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct WebsocketConfig {
+pub struct BinanceConfig {
     pub address: String,
-    pub event: Option<String>,
-    pub channel: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BitstampConfig {
+    pub address: String,
+    pub event: String,
+    pub channel: String,
 }
 
 impl Config {

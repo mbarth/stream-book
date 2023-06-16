@@ -1793,6 +1793,7 @@ dependencies = [
  "anyhow",
  "assert_approx_eq",
  "async-stream",
+ "async-trait",
  "config",
  "crossbeam-channel",
  "ctrlc",

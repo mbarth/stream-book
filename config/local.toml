@@ -2,17 +2,17 @@
 ip = "0.0.0.0"
 websocket_port = 50051
 api_port = 8080
-top_bids_and_asks_count = 10
+top_bids_and_asks_count = 20
 
 [deploy]
 env = "local"
 
 [exchanges]
 
-[exchanges.first_exchange.websocket]
+[exchanges.binance]
 address = "wss://stream.binance.com:9443/ws/ethbtc@depth20@100ms"
 
-[exchanges.second_exchange.websocket]
+[exchanges.bitstamp]
 address = "wss://ws.bitstamp.net"
 event = "bts:subscribe"
 channel = "order_book_ethbtc"

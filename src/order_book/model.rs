@@ -13,7 +13,7 @@ pub struct Order {
     pub price: f64,
     /// The amount of the order.
     pub amount: f64,
-    /// The time when the order was placed.
+    /// The time when the order was received (streamed).
     pub timestamp: std::time::SystemTime,
     /// The side of the order, either bid or ask.
     pub order_side: OrderSide,
@@ -38,7 +38,7 @@ impl Default for Order {
             exchange: String::from("DefaultExchange"),
             price: 0.0,
             amount: 0.0,
-            timestamp: UNIX_EPOCH, // Earliest possible time
+            timestamp: UNIX_EPOCH,
             order_side: OrderSide::default(),
         }
     }
@@ -58,7 +58,7 @@ impl Ord for Order {
                 OrderSide::Ask => Ordering::Less,
             }
         } else {
-            // next first order in wins
+            // next order streamed in wins
             other.timestamp.cmp(&self.timestamp)
         }
     }
@@ -89,16 +89,20 @@ pub struct OrderBook {
     bid_orders: BinaryHeap<Order>,
     /// The ask orders in the order book.
     ask_orders: BinaryHeap<Order>,
-
+    /// Exchanges where the results arrived from.
     exchanges: HashSet<String>,
 }
 
 /// Snapshot containing only the top bids, asks, and the spread.
 #[derive(Debug, Clone)]
 pub struct OrderBookSnapshot {
+    /// Collection of the top bids.
     pub top_bids: Vec<Order>,
+    /// Collection of the top asks.
     pub top_asks: Vec<Order>,
+    /// The spread of the order book.
     pub spread: f64,
+    /// Time the snapshot was generated.
     pub timestamp: std::time::SystemTime,
 }
 
@@ -108,7 +112,7 @@ impl Default for OrderBookSnapshot {
             top_bids: Vec::new(),
             top_asks: Vec::new(),
             spread: 0.0,
-            timestamp: UNIX_EPOCH, // Earliest possible time
+            timestamp: UNIX_EPOCH,
         }
     }
 }
@@ -147,6 +151,7 @@ impl OrderBook {
         self.exchanges.insert(exchange.to_string());
     }
 
+    /// Count of unique exchange results in the order book.
     pub fn exchanges_count(&self) -> usize {
         self.exchanges.len()
     }
@@ -154,15 +159,28 @@ impl OrderBook {
     // Returns the top n bid orders from the order book.
     fn top_bids(&self, n: usize) -> Vec<Order> {
         let mut cloned_data = self.bid_orders.clone();
-        cloned_data.drain().take(n).collect()
+        OrderBook::sort_and_filter_values(n, &mut cloned_data)
     }
 
     // Returns the top n ask orders from the order book.
     fn top_asks(&self, n: usize) -> Vec<Order> {
         let mut cloned_data = self.ask_orders.clone();
-        cloned_data.drain().take(n).collect()
+        OrderBook::sort_and_filter_values(n, &mut cloned_data)
     }
 
+    // Sort the values in the passed in hashmap and then grab the top n values.
+    fn sort_and_filter_values(n: usize, data: &mut BinaryHeap<Order>) -> Vec<Order> {
+        let mut sorted_data: Vec<Order> = Vec::new();
+        // Grab the top n values
+        for _ in 0..n {
+            if let Some(data) = data.pop() {
+                sorted_data.push(data);
+            }
+        }
+        sorted_data
+    }
+
+    /// Generates a snapshot of the order book.
     pub fn generate_snapshot(&mut self, n: usize) -> OrderBookSnapshot {
         let top_bids = self.top_bids(n);
         let top_asks = self.top_asks(n);
@@ -176,6 +194,7 @@ impl OrderBook {
         }
     }
 
+    // Calculates the spread of the order book.
     fn calculate_spread(&self, top_bids: &[Order], top_asks: &[Order]) -> f64 {
         match (top_bids.get(0), top_asks.get(0)) {
             (Some(bid), Some(ask)) => bid.price - ask.price,

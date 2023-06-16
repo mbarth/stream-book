@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod binance_ws_client;
+mod bitstamp_client;
+mod ws_async_client_factory;
 pub mod ws_listeners;
 
 // ########################### Generalized structs ############################

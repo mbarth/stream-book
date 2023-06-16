@@ -10,23 +10,21 @@ use futures::{
     prelude::stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use native_tls::TlsConnector as NativeTlsConnector;
 use serde::de::DeserializeOwned;
-use tokio::sync::broadcast::Sender as BroadcastSender;
-use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::broadcast::{Sender as BroadcastSender, Sender};
+use tokio::sync::mpsc::{Receiver, Sender as MpscSender};
 use tokio::{net::TcpStream, task::JoinHandle};
-use tokio_native_tls::{TlsConnector, TlsStream};
-use tokio_tungstenite::{
-    client_async_with_config, tungstenite::protocol::Message, WebSocketStream,
-};
+use tokio_native_tls::TlsStream;
+use tokio_tungstenite::{tungstenite::protocol::Message, WebSocketStream};
 use tracing::{debug, error, info, trace};
-use url::Url;
 
 use crate::order_book::model::{OrderBook, OrderBookSnapshot};
 use crate::utils::config::Config;
+use crate::ws_data_providers::ws_async_client_factory::{
+    WsAsyncClientFactory, BINANCE_CLIENT_ID, BITSTAMP_CLIENT_ID,
+};
 use crate::ws_data_providers::{
-    BinanceOrderBookMessage, BitstampOrderBookMessage, ExchangeOrderBookMessage, SubscribeData,
-    SubscribeMessage,
+    BinanceOrderBookMessage, BitstampOrderBookMessage, ExchangeOrderBookMessage,
 };
 
 // Function to start WebSocket listeners for different exchanges and aggregates the data into a shared OrderBook
@@ -37,55 +35,67 @@ pub async fn start_ws_listeners(
     // set up ctrl-c handler to stop the listener threads
     let (abort_handle, should_abort) = abort_handlers()?;
 
-    // Initialize WebSocket clients for first and second configured exchanges (Binance and Bitstamp).
-    let (first_exchange_sink, first_exchange_stream) = ws_async_client(
-        &config.exchanges.first_exchange.websocket.address,
-        "binance",
-        None,
-        None,
-    )
-    .await?;
-    let (second_exchange_sink, second_exchange_stream) = ws_async_client(
-        &config.exchanges.second_exchange.websocket.address,
-        "bitstamp",
-        config.exchanges.second_exchange.websocket.event.as_deref(),
-        config
-            .exchanges
-            .second_exchange
-            .websocket
-            .channel
-            .as_deref(),
-    )
-    .await?;
+    // Retrieve WebSocket clients for binance and bitstamp exchanges.
+    let factory = WsAsyncClientFactory::new(config);
+    let binance_ws_client = factory.get_ws_client(BINANCE_CLIENT_ID)?;
+    let bitstamp_ws_client = factory.get_ws_client(BITSTAMP_CLIENT_ID)?;
+    let (binance_sink, binance_stream) = binance_ws_client.get_sink_and_stream().await?;
+    let (bitstamp_sink, bitstamp_stream) = bitstamp_ws_client.get_sink_and_stream().await?;
 
     // Create an unbounded channel for sending and receiving messages between tasks
-    let (channel_sender, mut channel_receiver) = tokio::sync::mpsc::channel(100);
+    let (message_sender, message_receiver) = tokio::sync::mpsc::channel(100);
 
     // Spawn tasks to listen and parse messages from Binance and Bitstamp
-    let first_exchange_parser_task = spawn_message_listener(
-        first_exchange_sink,
-        first_exchange_stream,
-        channel_sender.clone(),
+    let binance_parser_task = spawn_message_listener(
+        binance_sink,
+        binance_stream,
+        message_sender.clone(),
         message_parser::<BinanceOrderBookMessage>,
         should_abort.clone(),
         abort_handle.clone(),
     );
-    let second_exchange_parser_task = spawn_message_listener(
-        second_exchange_sink,
-        second_exchange_stream,
-        channel_sender,
+    let bitstamp_parser_task = spawn_message_listener(
+        bitstamp_sink,
+        bitstamp_stream,
+        message_sender,
         message_parser::<BitstampOrderBookMessage>,
         should_abort.clone(),
         abort_handle.clone(),
     );
 
+    let aggregator_task = spawn_order_book_aggregator(
+        config,
+        message_receiver,
+        snapshot_sender,
+        abort_handle,
+        should_abort,
+    );
+
+    // Spawn a main task to manage the three tasks (Binance listener, Bitstamp listener, and aggregator)
+    let handle = tokio::task::spawn(async move {
+        match tokio::try_join!(binance_parser_task, bitstamp_parser_task, aggregator_task) {
+            Ok(_) => debug!("WS Subscribers completed."),
+            Err(_) => error!("One or more tasks failed."),
+        }
+    });
+
+    Ok(handle)
+}
+
+fn spawn_order_book_aggregator(
+    config: &Config,
+    mut channel_receiver: Receiver<ExchangeOrderBookMessage>,
+    snapshot_sender: Sender<OrderBookSnapshot>,
+    abort_handle: AbortHandle,
+    should_abort: Arc<AtomicBool>,
+) -> JoinHandle<()> {
     // HashSet used to exclude duplicates values received from the exchanges
     let mut exclude_duplicates = HashSet::new();
 
     // Spawn a task to aggregate order book data received from Binance and Bitstamp
     let mut order_book = OrderBook::new();
     let top_bids_and_asks_count = config.app.top_bids_and_asks_count;
-    let aggregator_task = tokio::spawn(async move {
+    tokio::spawn(async move {
         info!("Aggregator_task thread started");
         while let Some(message) = channel_receiver.recv().await {
             // handler for ctrl-c
@@ -132,21 +142,7 @@ pub async fn start_ws_listeners(
                 exclude_duplicates.clear();
             }
         }
-    });
-
-    // Spawn a main task to manage the three tasks (Binance listener, Bitstamp listener, and aggregator)
-    let handle = tokio::task::spawn(async move {
-        match tokio::try_join!(
-            first_exchange_parser_task,
-            second_exchange_parser_task,
-            aggregator_task
-        ) {
-            Ok(_) => debug!("WS Subscribers completed."),
-            Err(_) => error!("One or more tasks failed."),
-        }
-    });
-
-    Ok(handle)
+    })
 }
 
 // Service will not stop when the websocket client listeners running. These ctrl-c handlers are used
@@ -249,71 +245,6 @@ where
             }
         }
     })
-}
-
-// Function to establish a WebSocket connection to a specific exchange. A `sink` and `stream` are
-// returned to the caller. The sink is used to send messages to the exchange such as a PING message
-// keeping the connection alive. The stream is used to receive messages from the exchange.
-async fn ws_async_client(
-    address: &str,
-    exchange: &str,
-    event: Option<&str>,
-    channel: Option<&str>,
-) -> anyhow::Result<(
-    SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
-    SplitStream<WebSocketStream<TlsStream<TcpStream>>>,
-)> {
-    // connection setup and handshake code
-    let url = Url::parse(address)?;
-    let domain = url
-        .domain()
-        .ok_or_else(|| anyhow::anyhow!("Domain not found in URL {}", url))?
-        .to_string();
-    let socket = TcpStream::connect((domain.as_str(), url.port().unwrap_or(443)))
-        .await
-        .context(format!("Failed to connect to {} host", exchange))?;
-    let connector = NativeTlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .context(format!(
-            "Failed to create TLS connector for {} host",
-            exchange
-        ))?;
-    let stream = TlsConnector::from(connector)
-        .connect(domain.as_str(), socket)
-        .await
-        .context(format!("Failed TLS handshake for {}", exchange))?;
-
-    info!("Connecting to {}", address);
-
-    let (ws_stream, _) = client_async_with_config(url, stream, None)
-        .await
-        .context(format!(
-            "Failed to complete websocket handshake for host {}",
-            exchange
-        ))?;
-
-    info!(
-        "WebSocket handshake has been successfully completed for {}",
-        exchange
-    );
-    let (mut write, read) = ws_stream.split();
-
-    // NOTE: This function is shared by exchanges that work with a simple URL or another that requires
-    // submitting a subscription request. If either `event` or `channel` is provided, it will be used to
-    // construct the subscription request.
-    if let (Some(event), Some(channel)) = (event, channel) {
-        let subscribe_message = SubscribeMessage {
-            event: String::from(event),
-            data: SubscribeData {
-                channel: String::from(channel),
-            },
-        };
-        let subscribe_message_json = serde_json::to_string(&subscribe_message)?;
-        write.send(Message::Text(subscribe_message_json)).await?;
-    }
-
-    Ok((write, read))
 }
 
 #[cfg(test)]
